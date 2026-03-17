@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard – KhataBook</title>
+  <link rel="stylesheet" href="styles.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="hamburger" id="hamburger">☰</button>
+        <h1>📊 Dashboard</h1>
+      </div>
+      <span id="greeting" style="color:var(--muted);font-size:13px;"></span>
+    </div>
+    <div class="page-content">
+
+      <div class="stats-grid" id="statsGrid"></div>
+
+      <!-- Charts -->
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>📈 Monthly Income vs Expenses</h3>
+          <canvas id="barChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>🥧 Expense Breakdown</h3>
+          <canvas id="pieChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Spending Insights -->
+      <div class="insight-grid" id="insightGrid"></div>
+
+      <!-- Recent Transactions -->
+      <div class="card">
+        <div class="card-header">
+          <h3>🕐 Recent Transactions</h3>
+          <a href="transactions.html" class="btn btn-outline btn-sm">View All</a>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th>Amount</th></tr></thead>
+            <tbody id="recentTxns"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+<nav class="bottom-nav" id="bottomNav"></nav>
+
+<script src="app.js"></script>
+<script>
+Auth.guard();
+renderSidebar('dashboard.html');
+
+const user = Auth.current();
+document.getElementById('greeting').textContent = `Hi, ${user.name} 👋`;
+
+function renderStats() {
+  const txns = DB.get('transactions') || [];
+  const loans = DB.get('loans') || [];
+  const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const expense = txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  const loanPending = loans.filter(l => l.paid < l.amount).reduce((s, l) => s + (l.amount - l.paid), 0);
+  const customers = (DB.get('customers') || []).length;
+  const overdue = loans.filter(l => l.due && new Date(l.due) < new Date() && l.paid < l.amount).length;
+
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-icon green">💰</div><div><div class="stat-label">Total Income</div><div class="stat-value green">${fmt(income)}</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">💸</div><div><div class="stat-label">Total Expenses</div><div class="stat-value red">${fmt(expense)}</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">📊</div><div><div class="stat-label">Net Balance</div><div class="stat-value ${income-expense>=0?'blue':'red'}">${fmt(income - expense)}</div></div></div>
+    <div class="stat-card"><div class="stat-icon orange">🏦</div><div><div class="stat-label">Loans Pending</div><div class="stat-value orange">${fmt(loanPending)}</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">👥</div><div><div class="stat-label">Customers</div><div class="stat-value blue">${customers}</div></div></div>
+    ${overdue ? `<div class="stat-card"><div class="stat-icon red">⚠️</div><div><div class="stat-label">Overdue Loans</div><div class="stat-value red">${overdue}</div></div></div>` : ''}`;
+}
+
+function renderCharts() {
+  const txns = DB.get('transactions') || [];
+  const now = new Date();
+  const last6 = Array.from({length: 6}, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+    return { label: months[d.getMonth()] + "'" + d.getFullYear().toString().slice(2), month: d.getMonth(), year: d.getFullYear() };
+  });
+  const incomeData = last6.map(m => txns.filter(t => t.type==='income' && new Date(t.date).getMonth()===m.month && new Date(t.date).getFullYear()===m.year).reduce((s,t)=>s+t.amount,0));
+  const expenseData = last6.map(m => txns.filter(t => t.type==='expense' && new Date(t.date).getMonth()===m.month && new Date(t.date).getFullYear()===m.year).reduce((s,t)=>s+t.amount,0));
+
+  new Chart(document.getElementById('barChart'), {
+    type: 'bar',
+    data: { labels: last6.map(m=>m.label), datasets: [
+      { label: 'Income', data: incomeData, backgroundColor: '#86efac', borderRadius: 4 },
+      { label: 'Expenses', data: expenseData, backgroundColor: '#fca5a5', borderRadius: 4 }
+    ]},
+    options: { responsive: true, plugins: { legend: { position: 'top' } } }
+  });
+
+  const catMap = {};
+  txns.filter(t=>t.type==='expense').forEach(t => { catMap[t.category]=(catMap[t.category]||0)+t.amount; });
+  const cats = Object.keys(catMap);
+  const colors = ['#60a5fa','#f87171','#34d399','#fbbf24','#a78bfa','#fb923c','#38bdf8'];
+  new Chart(document.getElementById('pieChart'), {
+    type: 'doughnut',
+    data: { labels: cats.length?cats:['No Data'], datasets: [{ data: cats.length?cats.map(c=>catMap[c]):[1], backgroundColor: colors }] },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+}
+
+function renderInsights() {
+  const { topCats, bestMonth, topBorrower } = getSpendingInsights();
+  document.getElementById('insightGrid').innerHTML = `
+    <div class="insight-card">
+      <h4>🔥 Top Expense Categories</h4>
+      ${topCats.length ? topCats.map(([cat, amt]) => `
+        <div class="insight-item"><span>${cat}</span><span style="font-weight:700;color:var(--danger)">${fmt(amt)}</span></div>`).join('')
+        : '<div style="color:var(--muted);font-size:13px">No expense data yet.</div>'}
+    </div>
+    <div class="insight-card">
+      <h4>📅 Best Income Month</h4>
+      ${bestMonth
+        ? `<div class="insight-item"><span>${bestMonth[0]}</span><span style="font-weight:700;color:var(--success)">${fmt(bestMonth[1])}</span></div>`
+        : '<div style="color:var(--muted);font-size:13px">No income data yet.</div>'}
+      <h4 style="margin-top:12px">👤 Top Borrower</h4>
+      ${topBorrower
+        ? `<div class="insight-item"><span>${topBorrower[0]}</span><span style="font-weight:700;color:var(--warning)">${fmt(topBorrower[1])}</span></div>`
+        : '<div style="color:var(--muted);font-size:13px">No loan data yet.</div>'}
+    </div>`;
+}
+
+function renderRecent() {
+  const txns = (DB.get('transactions') || []).slice(-5).reverse();
+  document.getElementById('recentTxns').innerHTML = txns.length
+    ? txns.map(t => `<tr>
+        <td>${new Date(t.date).toLocaleDateString('en-IN')}</td>
+        <td>${t.description}</td>
+        <td><span class="badge badge-blue">${t.category}</span></td>
+        <td><span class="badge ${t.type==='income'?'badge-green':'badge-red'}">${t.type}</span></td>
+        <td style="font-weight:600;color:${t.type==='income'?'var(--success)':'var(--danger)'}">${fmt(t.amount)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:28px">No transactions yet. <a href="transactions.html">Add one!</a></td></tr>';
+}
+
+renderStats(); renderCharts(); renderInsights(); renderRecent();
+</script>
+</body>
+</html>

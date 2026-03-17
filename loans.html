@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Loans – KhataBook</title>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="hamburger" id="hamburger">☰</button>
+        <h1>🏦 Loans</h1>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ Add</button>
+    </div>
+    <div class="page-content">
+
+      <div class="stats-grid" id="loanStats"></div>
+
+      <!-- Export -->
+      <div class="export-bar">
+        <button class="btn btn-outline btn-sm" onclick="doExportCSV()">📥 Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="doExportPDF()">🖨️ Print / PDF</button>
+      </div>
+
+      <!-- Filters -->
+      <div class="filter-bar">
+        <select id="dateRange" onchange="renderTable()">
+          <option value="all">All Time</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="30d">Last 30 Days</option>
+          <option value="month">This Month</option>
+          <option value="year">This Year</option>
+        </select>
+        <select id="statusFilter" onchange="renderTable()">
+          <option value="">All Status</option>
+          <option value="pending">Pending</option>
+          <option value="partial">Partial</option>
+          <option value="paid">Paid</option>
+        </select>
+        <select id="dirFilter" onchange="renderTable()">
+          <option value="">All Types</option>
+          <option value="given">Given</option>
+          <option value="taken">Taken</option>
+        </select>
+        <input type="text" id="searchFilter" oninput="renderTable()" placeholder="🔍 Search name..."/>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>📋 Loan Records</h3></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Person</th><th>Type</th><th>Amount</th><th>Paid</th><th>Remaining</th><th>Due Date</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="loanTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<nav class="bottom-nav" id="bottomNav"></nav>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">Add Loan</h3>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="form-group">
+      <label>Loan Type</label>
+      <select id="fDir">
+        <option value="given">📤 Given (I lent money)</option>
+        <option value="taken">📥 Taken (I borrowed)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Person Name *</label>
+      <input type="text" id="fName" placeholder="Borrower / Lender name"/>
+    </div>
+    <div class="form-group">
+      <label>Phone</label>
+      <input type="tel" id="fPhone" placeholder="Contact number"/>
+    </div>
+    <div class="form-group">
+      <label>Loan Amount (₹) *</label>
+      <input type="number" id="fAmount" placeholder="0" min="0"/>
+    </div>
+    <div class="form-group">
+      <label>Amount Paid (₹)</label>
+      <input type="number" id="fPaid" placeholder="0" min="0" value="0"/>
+    </div>
+    <div class="form-group">
+      <label>Loan Date *</label>
+      <input type="date" id="fDate"/>
+    </div>
+    <div class="form-group">
+      <label>Due Date</label>
+      <input type="date" id="fDue"/>
+    </div>
+    <div class="form-group">
+      <label>Note</label>
+      <textarea id="fNote" rows="2" placeholder="Purpose or remarks..."></textarea>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveLoan()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Payment Modal -->
+<div class="modal-overlay hidden" id="payModalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>💳 Record Payment</h3>
+      <button class="modal-close" onclick="closePayModal()">×</button>
+    </div>
+    <div id="payInfo" style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px"></div>
+    <div class="form-group">
+      <label>Payment Amount (₹)</label>
+      <input type="number" id="payAmount" placeholder="0" min="0"/>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closePayModal()">Cancel</button>
+      <button class="btn btn-success" onclick="recordPayment()">✅ Record</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+Auth.guard();
+renderSidebar('loans.html');
+
+let editId = null, payId = null;
+function getLoans() { return DB.get('loans') || []; }
+function getStatus(l) {
+  if (l.paid >= l.amount) return 'paid';
+  if (l.paid > 0) return 'partial';
+  return 'pending';
+}
+
+function openModal(id = null) {
+  editId = id;
+  document.getElementById('modalTitle').textContent = id ? 'Edit Loan' : 'Add Loan';
+  document.getElementById('fDate').value = new Date().toISOString().split('T')[0];
+  if (id) {
+    const l = getLoans().find(l => l.id === id);
+    document.getElementById('fDir').value = l.direction;
+    document.getElementById('fName').value = l.name;
+    document.getElementById('fPhone').value = l.phone || '';
+    document.getElementById('fAmount').value = l.amount;
+    document.getElementById('fPaid').value = l.paid;
+    document.getElementById('fDate').value = l.date;
+    document.getElementById('fDue').value = l.due || '';
+    document.getElementById('fNote').value = l.note || '';
+  } else {
+    ['fName','fPhone','fAmount','fDue','fNote'].forEach(i => document.getElementById(i).value = '');
+    document.getElementById('fPaid').value = '0';
+    document.getElementById('fDir').value = 'given';
+  }
+  document.getElementById('modalOverlay').classList.remove('hidden');
+}
+function closeModal() { document.getElementById('modalOverlay').classList.add('hidden'); editId = null; }
+
+function saveLoan() {
+  const direction = document.getElementById('fDir').value;
+  const name = document.getElementById('fName').value.trim();
+  const phone = document.getElementById('fPhone').value.trim();
+  const amount = parseFloat(document.getElementById('fAmount').value);
+  const paid = parseFloat(document.getElementById('fPaid').value) || 0;
+  const date = document.getElementById('fDate').value;
+  const due = document.getElementById('fDue').value;
+  const note = document.getElementById('fNote').value.trim();
+  if (!name || !amount || !date) return alert('Fill required fields.');
+  let loans = getLoans();
+  if (editId) {
+    loans = loans.map(l => l.id === editId ? { ...l, direction, name, phone, amount, paid, date, due, note } : l);
+  } else {
+    loans.push({ id: uid(), direction, name, phone, amount, paid, date, due, note });
+  }
+  DB.set('loans', loans);
+  closeModal();
+  renderAll();
+}
+
+function deleteLoan(id) {
+  if (!confirm('Delete this loan?')) return;
+  DB.set('loans', getLoans().filter(l => l.id !== id));
+  renderAll();
+}
+
+function openPayModal(id) {
+  payId = id;
+  const l = getLoans().find(l => l.id === id);
+  document.getElementById('payInfo').innerHTML = `<b>${l.name}</b> &nbsp;|&nbsp; Total: ${fmt(l.amount)} &nbsp;|&nbsp; Paid: ${fmt(l.paid)} &nbsp;|&nbsp; Remaining: <b style="color:var(--danger)">${fmt(l.amount - l.paid)}</b>`;
+  document.getElementById('payAmount').value = '';
+  document.getElementById('payModalOverlay').classList.remove('hidden');
+}
+function closePayModal() { document.getElementById('payModalOverlay').classList.add('hidden'); payId = null; }
+
+function recordPayment() {
+  const pay = parseFloat(document.getElementById('payAmount').value);
+  if (!pay || pay <= 0) return alert('Enter valid amount.');
+  DB.set('loans', getLoans().map(l => l.id !== payId ? l : { ...l, paid: Math.min(l.paid + pay, l.amount) }));
+  closePayModal();
+  renderAll();
+}
+
+function doExportCSV() {
+  const loans = getFilteredLoans();
+  exportCSV(
+    ['Person','Phone','Type','Amount','Paid','Remaining','Date','Due Date','Status','Note'],
+    loans.map(l => [l.name, l.phone||'', l.direction, l.amount, l.paid, l.amount-l.paid, l.date, l.due||'', getStatus(l), l.note||'']),
+    'loans.csv'
+  );
+}
+
+function doExportPDF() {
+  const loans = getFilteredLoans();
+  const rows = loans.map(l => `<tr>
+    <td>${l.name}</td><td>${l.direction}</td>
+    <td>₹${Number(l.amount).toLocaleString('en-IN')}</td>
+    <td>₹${Number(l.paid).toLocaleString('en-IN')}</td>
+    <td>₹${Number(l.amount-l.paid).toLocaleString('en-IN')}</td>
+    <td>${l.due||'—'}</td><td>${getStatus(l)}</td>
+  </tr>`).join('');
+  exportPDF('Loans Report', `<table><thead><tr><th>Person</th><th>Type</th><th>Amount</th><th>Paid</th><th>Remaining</th><th>Due</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`);
+}
+
+function getFilteredLoans() {
+  const range = document.getElementById('dateRange').value;
+  const statusF = document.getElementById('statusFilter').value;
+  const dirF = document.getElementById('dirFilter').value;
+  const search = document.getElementById('searchFilter').value.toLowerCase();
+  return filterByDateRange(getLoans(), 'date', range).filter(l => {
+    if (statusF && getStatus(l) !== statusF) return false;
+    if (dirF && l.direction !== dirF) return false;
+    if (search && !l.name.toLowerCase().includes(search)) return false;
+    return true;
+  }).sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
+function renderStats() {
+  const loans = getLoans();
+  const given = loans.filter(l => l.direction==='given').reduce((s,l) => s+(l.amount-l.paid), 0);
+  const taken = loans.filter(l => l.direction==='taken').reduce((s,l) => s+(l.amount-l.paid), 0);
+  const overdue = loans.filter(l => l.due && new Date(l.due)<new Date() && getStatus(l)!=='paid').length;
+  document.getElementById('loanStats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon green">📤</div><div><div class="stat-label">To Receive</div><div class="stat-value green">${fmt(given)}</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">📥</div><div><div class="stat-label">To Pay</div><div class="stat-value red">${fmt(taken)}</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">🔢</div><div><div class="stat-label">Total Loans</div><div class="stat-value blue">${loans.length}</div></div></div>
+    <div class="stat-card"><div class="stat-icon orange">⚠️</div><div><div class="stat-label">Overdue</div><div class="stat-value orange">${overdue}</div></div></div>`;
+}
+
+function renderTable() {
+  const loans = getFilteredLoans();
+  const sb = { paid:'badge-green', partial:'badge-orange', pending:'badge-red' };
+  document.getElementById('loanTable').innerHTML = loans.length
+    ? loans.map(l => {
+        const status = getStatus(l);
+        const isOverdue = l.due && new Date(l.due) < new Date() && status !== 'paid';
+        return `<tr style="${isOverdue?'background:#fff7ed':''}">
+          <td>
+            <div style="font-weight:600">${l.name}</div>
+            ${l.phone?`<div style="font-size:11px;color:var(--muted)">${l.phone}</div>`:''}
+          </td>
+          <td><span class="badge ${l.direction==='given'?'badge-green':'badge-red'}">${l.direction==='given'?'📤 Given':'📥 Taken'}</span></td>
+          <td style="font-weight:600">${fmt(l.amount)}</td>
+          <td style="color:var(--success)">${fmt(l.paid)}</td>
+          <td style="font-weight:700;color:var(--danger)">${fmt(l.amount-l.paid)}</td>
+          <td style="color:${isOverdue?'var(--danger)':'inherit'};font-size:12px">
+            ${l.due?new Date(l.due).toLocaleDateString('en-IN'):'—'}${isOverdue?' ⚠️':''}
+          </td>
+          <td><span class="badge ${sb[status]}">${status}</span></td>
+          <td>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              ${status!=='paid'?`<button class="btn btn-success btn-sm" onclick="openPayModal('${l.id}')">💳</button>`:''}
+              ${l.phone&&status!=='paid'?`<button class="btn btn-sm" style="background:#25d366;color:#fff" onclick="sendWhatsApp('${l.phone}','${l.name}',${l.amount-l.paid})">💬</button>`:''}
+              <button class="btn btn-outline btn-sm" onclick="openModal('${l.id}')">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteLoan('${l.id}')">🗑️</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:28px">No loans found.</td></tr>';
+}
+
+function renderAll() { renderStats(); renderTable(); }
+renderAll();
+</script>
+</body>
+</html>
