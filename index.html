@@ -5,6 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>KhataBook – Login</title>
   <link rel="stylesheet" href="styles.css"/>
+  <script src="https://accounts.google.com/gsi/client" async></script>
+  <style>
+    .divider { display:flex; align-items:center; gap:10px; margin:16px 0; color:var(--muted); font-size:13px; }
+    .divider::before, .divider::after { content:''; flex:1; height:1px; background:var(--border); }
+    .google-btn {
+      width:100%; padding:11px; border:1.5px solid var(--border); border-radius:8px;
+      background:#fff; display:flex; align-items:center; justify-content:center;
+      gap:10px; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.2s;
+      color:var(--text);
+    }
+    .google-btn:hover { background:#f8fafc; border-color:#94a3b8; }
+    .google-btn img { width:20px; height:20px; }
+    #googleBtnLogin, #googleBtnRegister { display:flex; justify-content:center; margin-bottom:4px; }
+    #googleBtnLogin > div, #googleBtnRegister > div { width:100% !important; }
+  </style>
 </head>
 <body>
 <div class="auth-wrapper">
@@ -21,6 +36,12 @@
     <!-- Login Form -->
     <div id="loginForm">
       <div id="loginAlert"></div>
+
+      <!-- Google Login Button -->
+      <div id="googleBtnLogin"></div>
+
+      <div class="divider">or login with email</div>
+
       <div class="form-group">
         <label>Email Address</label>
         <input type="email" id="loginEmail" placeholder="you@example.com"/>
@@ -35,6 +56,12 @@
     <!-- Register Form -->
     <div id="registerForm" style="display:none">
       <div id="regAlert"></div>
+
+      <!-- Google Register Button -->
+      <div id="googleBtnRegister"></div>
+
+      <div class="divider">or register with email</div>
+
       <div class="form-group">
         <label>Full Name</label>
         <input type="text" id="regName" placeholder="Your business name"/>
@@ -58,9 +85,37 @@
 
 <script src="app.js"></script>
 <script>
-  // Redirect if already logged in
   if (Auth.current()) window.location.href = 'dashboard.html';
 
+  // ── Google OAuth ──────────────────────────────────────────────
+  const CLIENT_ID = '504433038362-m73ebc1qipm3u5reimtmu5gdapnuld2s.apps.googleusercontent.com';
+
+  function initGoogle() {
+    if (typeof google === 'undefined') { setTimeout(initGoogle, 300); return; }
+    google.accounts.id.initialize({ client_id: CLIENT_ID, callback: handleGoogleResponse });
+    ['googleBtnLogin', 'googleBtnRegister'].forEach(id => {
+      google.accounts.id.renderButton(document.getElementById(id), {
+        theme: 'outline', size: 'large', width: 340, text: id.includes('Login') ? 'signin_with' : 'signup_with'
+      });
+    });
+  }
+  initGoogle();
+
+  function handleGoogleResponse(response) {
+    const payload = JSON.parse(atob(response.credential.split('.')[1]));
+    const { name, email, picture, sub } = payload;
+    const users = DB.get('users') || [];
+    let user = users.find(u => u.email === email);
+    if (!user) {
+      user = { id: sub, name, email, picture, provider: 'google' };
+      users.push(user);
+      DB.set('users', users);
+    }
+    DB.set('currentUser', user);
+    window.location.href = 'dashboard.html';
+  }
+
+  // ── Email Auth ────────────────────────────────────────────────
   function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach((b, i) =>
       b.classList.toggle('active', (i === 0) === (tab === 'login')));
@@ -71,12 +126,12 @@
   function doLogin() {
     const email = document.getElementById('loginEmail').value.trim();
     const pass = document.getElementById('loginPassword').value;
-    const alert = document.getElementById('loginAlert');
-    if (!email || !pass) { alert.innerHTML = '<div class="alert alert-error">Fill all fields.</div>'; return; }
+    const alertEl = document.getElementById('loginAlert');
+    if (!email || !pass) { alertEl.innerHTML = '<div class="alert alert-error">Fill all fields.</div>'; return; }
     if (Auth.login(email, pass)) {
       window.location.href = 'dashboard.html';
     } else {
-      alert.innerHTML = '<div class="alert alert-error">Invalid email or password.</div>';
+      alertEl.innerHTML = '<div class="alert alert-error">Invalid email or password.</div>';
     }
   }
 
@@ -85,17 +140,16 @@
     const email = document.getElementById('regEmail').value.trim();
     const pass = document.getElementById('regPassword').value;
     const confirm = document.getElementById('regConfirm').value;
-    const alert = document.getElementById('regAlert');
-    if (!name || !email || !pass) { alert.innerHTML = '<div class="alert alert-error">Fill all fields.</div>'; return; }
-    if (pass !== confirm) { alert.innerHTML = '<div class="alert alert-error">Passwords do not match.</div>'; return; }
+    const alertEl = document.getElementById('regAlert');
+    if (!name || !email || !pass) { alertEl.innerHTML = '<div class="alert alert-error">Fill all fields.</div>'; return; }
+    if (pass !== confirm) { alertEl.innerHTML = '<div class="alert alert-error">Passwords do not match.</div>'; return; }
     if (Auth.register(name, email, pass)) {
       window.location.href = 'dashboard.html';
     } else {
-      alert.innerHTML = '<div class="alert alert-error">Email already registered.</div>';
+      alertEl.innerHTML = '<div class="alert alert-error">Email already registered.</div>';
     }
   }
 
-  // Allow Enter key
   document.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       const isLogin = document.getElementById('loginForm').style.display !== 'none';

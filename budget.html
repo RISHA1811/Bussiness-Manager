@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Budget – KhataBook</title>
+  <link rel="stylesheet" href="styles.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="hamburger" id="hamburger">☰</button>
+        <h1>🎯 Budget Manager</h1>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="monthPicker" onchange="renderAll()" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px"></select>
+        <button class="btn btn-primary btn-sm" onclick="openModal()">+ Set Budget</button>
+      </div>
+    </div>
+    <div class="page-content">
+
+      <!-- Summary Stats -->
+      <div class="stats-grid" id="budgetStats"></div>
+
+      <!-- Budget vs Actual Chart -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><h3>📊 Budget vs Actual Spending</h3></div>
+        <div class="card-body"><canvas id="budgetChart" style="max-height:260px"></canvas></div>
+      </div>
+
+      <!-- Category Budgets -->
+      <div id="budgetGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px"></div>
+
+      <!-- No budget state -->
+      <div id="emptyState" style="display:none;text-align:center;padding:60px 20px;color:var(--muted)">
+        <div style="font-size:48px;margin-bottom:12px">🎯</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:8px">No budgets set yet</div>
+        <div style="font-size:13px;margin-bottom:20px">Set monthly budgets for each category to track your spending</div>
+        <button class="btn btn-primary" onclick="openModal()">+ Set Your First Budget</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+<nav class="bottom-nav" id="bottomNav"></nav>
+
+<!-- Set Budget Modal -->
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🎯 Set Category Budget</h3>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="form-group">
+      <label>Category</label>
+      <select id="fCategory">
+        <option>Food</option><option>Transport</option><option>Rent</option>
+        <option>Utilities</option><option>Medical</option><option>Shopping</option>
+        <option>Entertainment</option><option>Salary</option><option>Business</option>
+        <option>Freelance</option><option>Other</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Monthly Budget (₹)</label>
+      <input type="number" id="fAmount" placeholder="e.g. 5000" min="0"/>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBudget()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+Auth.guard();
+initDarkMode();
+renderSidebar('budget.html');
+
+const CATEGORIES = ['Food','Transport','Rent','Utilities','Medical','Shopping','Entertainment','Salary','Business','Freelance','Other'];
+let chartInstance = null;
+
+// Populate month picker
+function initMonthPicker() {
+  const sel = document.getElementById('monthPicker');
+  const now = new Date();
+  sel.innerHTML = Array.from({length: 6}, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const val = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    const label = months[d.getMonth()] + ' ' + d.getFullYear();
+    return '<option value="' + val + '"' + (i === 0 ? ' selected' : '') + '>' + label + '</option>';
+  }).join('');
+}
+
+function getMonth() { return document.getElementById('monthPicker').value; }
+
+function openModal() { document.getElementById('modalOverlay').classList.remove('hidden'); }
+function closeModal() { document.getElementById('modalOverlay').classList.add('hidden'); }
+
+function saveBudget() {
+  const category = document.getElementById('fCategory').value;
+  const amount = parseFloat(document.getElementById('fAmount').value);
+  if (!amount || amount <= 0) return alert('Enter a valid amount.');
+  const budgets = getBudgets();
+  budgets[category] = amount;
+  DB.set('budgets', budgets);
+  closeModal();
+  renderAll();
+  showToast(category + ' budget set to ' + fmt(amount) + ' \ud83c\udfaf');
+}
+
+function deleteBudget(category) {
+  const budgets = getBudgets();
+  delete budgets[category];
+  DB.set('budgets', budgets);
+  renderAll();
+  showToast(category + ' budget removed.', 'info');
+}
+
+function renderStats() {
+  const budgets = getBudgets();
+  const month = getMonth();
+  const txns = DB.get('transactions') || [];
+  const totalBudget = Object.values(budgets).reduce((s, v) => s + v, 0);
+  const totalSpent = txns.filter(t => t.type === 'expense' && t.date.startsWith(month)).reduce((s, t) => s + t.amount, 0);
+  const overCount = Object.keys(budgets).filter(cat => {
+    const { budget, spent } = getBudgetStatus(cat, month);
+    return budget > 0 && spent > budget;
+  }).length;
+  const remaining = Math.max(0, totalBudget - totalSpent);
+
+  document.getElementById('budgetStats').innerHTML =
+    '<div class="stat-card"><div class="stat-icon blue">\ud83c\udfaf</div><div><div class="stat-label">Total Budget</div><div class="stat-value blue">' + fmt(totalBudget) + '</div></div></div>' +
+    '<div class="stat-card"><div class="stat-icon red">\ud83d\udcb8</div><div><div class="stat-label">Total Spent</div><div class="stat-value red">' + fmt(totalSpent) + '</div></div></div>' +
+    '<div class="stat-card"><div class="stat-icon green">\ud83d\udcb0</div><div><div class="stat-label">Remaining</div><div class="stat-value green">' + fmt(remaining) + '</div></div></div>' +
+    '<div class="stat-card"><div class="stat-icon orange">\u26a0\ufe0f</div><div><div class="stat-label">Over Budget</div><div class="stat-value orange">' + overCount + ' categories</div></div></div>';
+}
+
+function renderChart() {
+  const budgets = getBudgets();
+  const month = getMonth();
+  const cats = Object.keys(budgets);
+  if (!cats.length) return;
+  const budgetVals = cats.map(c => budgets[c]);
+  const spentVals = cats.map(c => getBudgetStatus(c, month).spent);
+
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(document.getElementById('budgetChart'), {
+    type: 'bar',
+    data: {
+      labels: cats,
+      datasets: [
+        { label: 'Budget', data: budgetVals, backgroundColor: '#93c5fd', borderRadius: 4 },
+        { label: 'Spent', data: spentVals, backgroundColor: '#fca5a5', borderRadius: 4 }
+      ]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'top' } } }
+  });
+}
+
+function renderGrid() {
+  const budgets = getBudgets();
+  const month = getMonth();
+  const cats = Object.keys(budgets);
+  const empty = document.getElementById('emptyState');
+  const grid = document.getElementById('budgetGrid');
+
+  if (!cats.length) {
+    empty.style.display = 'block';
+    grid.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  grid.style.display = 'grid';
+
+  grid.innerHTML = cats.map(cat => {
+    const { budget, spent, percent } = getBudgetStatus(cat, month);
+    const remaining = budget - spent;
+    const fillClass = percent >= 100 ? 'over' : percent >= 75 ? 'warn' : 'safe';
+    const statusIcon = percent >= 100 ? '\ud83d\udd34 Over Budget' : percent >= 75 ? '\ud83d\udfe1 Near Limit' : '\ud83d\udfe2 On Track';
+    return '<div class="card"><div class="card-body">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+        '<div style="font-weight:700;font-size:15px">' + cat + '</div>' +
+        '<div style="display:flex;gap:6px;align-items:center">' +
+          '<span style="font-size:11px">' + statusIcon + '</span>' +
+          '<button class="btn btn-danger btn-sm" onclick="deleteBudget(\'' + cat + '\')">\ud83d\uddd1\ufe0f</button>' +
+          '<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'fCategory\').value=\'' + cat + '\';document.getElementById(\'fAmount\').value=' + budget + ';openModal()">\u270f\ufe0f</button>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">' +
+        '<span style="color:var(--muted)">Spent: <b style="color:var(--danger)">' + fmt(spent) + '</b></span>' +
+        '<span style="color:var(--muted)">Budget: <b>' + fmt(budget) + '</b></span>' +
+      '</div>' +
+      '<div class="budget-bar"><div class="budget-fill ' + fillClass + '" style="width:' + percent + '%"></div></div>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--muted)">' +
+        '<span>' + percent + '% used</span>' +
+        '<span>' + (remaining >= 0 ? fmt(remaining) + ' left' : fmt(Math.abs(remaining)) + ' over') + '</span>' +
+      '</div>' +
+    '</div></div>';
+  }).join('');
+}
+
+function renderAll() { renderStats(); renderChart(); renderGrid(); }
+initMonthPicker();
+renderAll();
+</script>
+</body>
+</html>

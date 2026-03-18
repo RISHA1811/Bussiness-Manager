@@ -37,6 +37,7 @@ function renderSidebar(active) {
     { href: 'transactions.html', icon: '💰', label: 'Transactions' },
     { href: 'loans.html', icon: '🏦', label: 'Loans' },
     { href: 'customers.html', icon: '👥', label: 'Customers' },
+    { href: 'budget.html', icon: '🎯', label: 'Budget' },
   ];
   document.getElementById('sidebar').innerHTML = `
     <div class="sidebar-logo">
@@ -50,8 +51,14 @@ function renderSidebar(active) {
         </a>`).join('')}
     </nav>
     <div class="sidebar-footer">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:12px;color:#94a3b8">Dark Mode</span>
+        <button id="darkToggle" onclick="toggleDarkMode()" style="background:none;border:none;font-size:20px;cursor:pointer">${localStorage.getItem('darkMode')==='true'?'☀️':'🌙'}</button>
+      </div>
       <div class="user-info">
-        <div class="user-avatar">${user.name[0].toUpperCase()}</div>
+        ${user.picture
+          ? `<img src="${user.picture}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0" />`
+          : `<div class="user-avatar">${user.name[0].toUpperCase()}</div>`}
         <div><div class="user-name">${user.name}</div><div class="user-email">${user.email}</div></div>
       </div>
       <button class="logout-btn" onclick="Auth.logout()">🚪 Logout</button>
@@ -165,6 +172,43 @@ function calcCreditScore(customerId, customerName) {
   else { label = 'Poor'; color = '#dc2626'; }
 
   return { score, label, color };
+}
+
+// ── Toast Notifications ─────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-' + type;
+  toast.textContent = msg;
+  container.appendChild(toast);
+  setTimeout(() => toast.classList.add('show'), 10);
+  setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
+}
+
+// ── Dark Mode ─────────────────────────────────────────────────────
+function initDarkMode() {
+  if (localStorage.getItem('darkMode') === 'true') document.body.classList.add('dark');
+}
+function toggleDarkMode() {
+  document.body.classList.toggle('dark');
+  localStorage.setItem('darkMode', document.body.classList.contains('dark'));
+  const btn = document.getElementById('darkToggle');
+  if (btn) btn.textContent = document.body.classList.contains('dark') ? '☀️' : '🌙';
+}
+
+// ── Budget Helpers ────────────────────────────────────────────────
+function getBudgets() { return DB.get('budgets') || {}; }
+function getBudgetStatus(category, month) {
+  const budgets = getBudgets();
+  const budget = budgets[category] || 0;
+  const txns = DB.get('transactions') || [];
+  const spent = txns.filter(t => t.type === 'expense' && t.category === category && t.date.startsWith(month)).reduce((s, t) => s + t.amount, 0);
+  return { budget, spent, percent: budget ? Math.min(Math.round((spent / budget) * 100), 100) : 0 };
 }
 
 // ── Spending Pattern Analysis ─────────────────────────────────────
