@@ -67,10 +67,10 @@ function renderSidebar(active) {
   // Bottom nav
   const bnav = document.getElementById('bottomNav');
   if (bnav) {
-    bnav.innerHTML = `<div class="bottom-nav-inner">` +
-      nav.map(n => `<a href="${n.href}" class="bottom-nav-item ${active === n.href ? 'active' : ''}">
-        <span>${n.icon}</span><span>${n.label}</span></a>`).join('') +
-      `</div>`;
+    bnav.innerHTML = '<div class="bottom-nav-inner">' +
+      nav.map(n => '<a href="' + n.href + '" class="bottom-nav-item ' + (active === n.href ? 'active' : '') + '"><span>' + n.icon + '</span><span>' + n.label + '</span></a>').join('') +
+      '<button class="bottom-nav-item" onclick="Auth.logout()" style="background:none;border:none;cursor:pointer;color:#f87171"><span>🚪</span><span>Logout</span></button>' +
+      '</div>';
   }
 
   // Hamburger toggle
